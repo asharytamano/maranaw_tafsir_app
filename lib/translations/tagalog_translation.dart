@@ -8,7 +8,7 @@ class TagalogTranslation {
 
     // 🔹 URL of your GitHub raw JSON
     final url =
-        "https://raw.githubusercontent.com/asharytamano/quran-resources/main/tagalog_surahs_json/$surahStr.json";
+        "https://raw.githubusercontent.com/asharytamano/quran-translations/main/tagalog_surahs_json/$surahStr.json";
 
     try {
       final response = await http.get(Uri.parse(url));

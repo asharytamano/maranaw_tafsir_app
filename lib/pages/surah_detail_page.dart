@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
@@ -7,9 +6,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../utils/bookmark_manager.dart';
-
-// 🔹 import Tagalog translation service
-import '../translations/tagalog_translation.dart';
+import '../utils/translation_loader.dart';
 
 class SurahDetailPage extends StatefulWidget {
   final int surahNumber;
@@ -46,14 +43,16 @@ class _SurahDetailPageState extends State<SurahDetailPage> {
   bool repeatAyah = false;
   bool repeatSurah = false;
 
-  // 🔹 language toggle
+  // 🔹 language toggle (now dropdown)
   String selectedLanguage = "maranao";
 
   @override
   void initState() {
     super.initState();
-    fetchSurah().then((_) {
-      _loadTagalogTranslation(); // 🔹 load Tagalog alongside Maranao
+    fetchSurah().then((_) async {
+      await _mergeTranslation(QuranLanguage.tagalog, "translation_tl");
+      await _mergeTranslation(QuranLanguage.bisayan, "translation_bis");
+      await _mergeTranslation(QuranLanguage.english, "translation_en");
     });
     _loadReciterPref();
 
@@ -81,6 +80,21 @@ class _SurahDetailPageState extends State<SurahDetailPage> {
         }
       }
     });
+  }
+
+  Future<void> _mergeTranslation(QuranLanguage lang, String fieldKey) async {
+    final data = await TranslationLoader.load(lang, widget.surahNumber);
+    if (data != null) {
+      for (var i = 0; i < data.length && i < ayahs.length; i++) {
+        if (data[i].containsKey("ayah_number")) {
+          ayahs[i][fieldKey] = data[i][fieldKey] ??
+              data[i]["text_en"] ??
+              data[i]["translation_tl"] ??
+              data[i]["translation_bis"];
+        }
+      }
+      setState(() {});
+    }
   }
 
   // load last selected reciter
@@ -111,18 +125,6 @@ class _SurahDetailPageState extends State<SurahDetailPage> {
       _itemKeys = List.generate(ayahs.length, (_) => GlobalKey());
       loading = false;
     });
-  }
-
-  // 🔹 fetch Tagalog translation
-  Future<void> _loadTagalogTranslation() async {
-    final tagalogData = await TagalogTranslation.fetch(widget.surahNumber);
-    if (tagalogData != null) {
-      for (var i = 0; i < tagalogData["ayahs"].length; i++) {
-        ayahs[i]["translation_tl"] =
-        tagalogData["ayahs"][i]["translation_tl"];
-      }
-      setState(() {}); // refresh UI
-    }
   }
 
   String _mapReciterBaseUrl(String reciterId) {
@@ -214,9 +216,27 @@ class _SurahDetailPageState extends State<SurahDetailPage> {
       backgroundColor: Colors.white,
       appBar: AppBar(
         backgroundColor: Colors.orange,
-        title: Text(
-          "${widget.surahNameEnglish} (${widget.surahNameArabic})",
-          style: GoogleFonts.merriweather(color: Colors.black),
+        title: RichText(
+          text: TextSpan(
+            children: [
+              TextSpan(
+                text: widget.surahNameEnglish,
+                style: GoogleFonts.merriweather(
+                  color: Colors.black,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              TextSpan(
+                text: "  (${widget.surahNameArabic})",
+                style: GoogleFonts.amiri(
+                  color: Colors.black,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
         ),
         iconTheme: const IconThemeData(color: Colors.black),
       ),
@@ -224,28 +244,35 @@ class _SurahDetailPageState extends State<SurahDetailPage> {
           ? const Center(child: CircularProgressIndicator())
           : Column(
         children: [
-          // 🔹 Language toggle
+          // 🔹 Language Dropdown
           Padding(
             padding: const EdgeInsets.all(8.0),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                ChoiceChip(
-                  label: const Text("Maranao"),
-                  selected: selectedLanguage == "maranao",
-                  onSelected: (_) {
-                    setState(() => selectedLanguage = "maranao");
-                  },
+            child: DropdownButton<String>(
+              value: selectedLanguage,
+              isExpanded: true,
+              items: const [
+                DropdownMenuItem(
+                  value: "maranao",
+                  child: Text("Maranao – Abu Ahmad Tamano"),
                 ),
-                const SizedBox(width: 10),
-                ChoiceChip(
-                  label: const Text("Tagalog"),
-                  selected: selectedLanguage == "tagalog",
-                  onSelected: (_) {
-                    setState(() => selectedLanguage = "tagalog");
-                  },
+                DropdownMenuItem(
+                  value: "tagalog",
+                  child: Text("Tagalog – Rowwad Translation Center"),
+                ),
+                DropdownMenuItem(
+                  value: "bisayan",
+                  child: Text("Bisayan – Rowwad Translation Center"),
+                ),
+                DropdownMenuItem(
+                  value: "english",
+                  child: Text("English – Rowwad Translation Center"),
                 ),
               ],
+              onChanged: (val) {
+                if (val != null) {
+                  setState(() => selectedLanguage = val);
+                }
+              },
             ),
           ),
 
@@ -261,97 +288,41 @@ class _SurahDetailPageState extends State<SurahDetailPage> {
                     items: const [
                       DropdownMenuItem(
                         value: "sudais",
-                        child: Row(
-                          children: [
-                            Icon(Icons.mic,
-                                size: 18, color: Colors.orange),
-                            SizedBox(width: 6),
-                            Text("Abdurrahman As-Sudais"),
-                          ],
-                        ),
+                        child: Text("Abdurrahman As-Sudais"),
                       ),
                       DropdownMenuItem(
                         value: "afasy",
-                        child: Row(
-                          children: [
-                            Icon(Icons.mic,
-                                size: 18, color: Colors.orange),
-                            SizedBox(width: 6),
-                            Text("Mishary Rashid Alafasy"),
-                          ],
-                        ),
+                        child: Text("Mishary Rashid Alafasy"),
                       ),
                       DropdownMenuItem(
                         value: "ghamdi",
-                        child: Row(
-                          children: [
-                            Icon(Icons.mic,
-                                size: 18, color: Colors.orange),
-                            SizedBox(width: 6),
-                            Text("Saad Al-Ghamdi"),
-                          ],
-                        ),
+                        child: Text("Saad Al-Ghamdi"),
                       ),
                       DropdownMenuItem(
                         value: "rifai",
-                        child: Row(
-                          children: [
-                            Icon(Icons.mic,
-                                size: 18, color: Colors.orange),
-                            SizedBox(width: 6),
-                            Text("Hani Ar-Rifai"),
-                          ],
-                        ),
+                        child: Text("Hani Ar-Rifai"),
                       ),
                       DropdownMenuItem(
                         value: "abdulbasit",
-                        child: Row(
-                          children: [
-                            Icon(Icons.mic,
-                                size: 18, color: Colors.orange),
-                            SizedBox(width: 6),
-                            Text("Abdulbasit Abdussamad"),
-                          ],
-                        ),
+                        child: Text("Abdulbasit Abdussamad"),
                       ),
                       DropdownMenuItem(
                         value: "menshawi",
-                        child: Row(
-                          children: [
-                            Icon(Icons.mic,
-                                size: 18, color: Colors.orange),
-                            SizedBox(width: 6),
-                            Text("Menshawi"),
-                          ],
-                        ),
+                        child: Text("Menshawi"),
                       ),
                       DropdownMenuItem(
                         value: "fares",
-                        child: Row(
-                          children: [
-                            Icon(Icons.mic,
-                                size: 18, color: Colors.orange),
-                            SizedBox(width: 6),
-                            Text("Fares Abbad"),
-                          ],
-                        ),
+                        child: Text("Fares Abbad"),
                       ),
                       DropdownMenuItem(
                         value: "matroud",
-                        child: Row(
-                          children: [
-                            Icon(Icons.mic,
-                                size: 18, color: Colors.orange),
-                            SizedBox(width: 6),
-                            Text("Abdullah Matroud"),
-                          ],
-                        ),
+                        child: Text("Abdullah Matroud"),
                       ),
                     ],
                     onChanged: (val) {
                       if (val != null) {
                         setState(() => selectedReciter = val);
-                        _saveReciterPref(val); // save last reciter
+                        _saveReciterPref(val);
                       }
                     },
                   ),
@@ -405,8 +376,9 @@ class _SurahDetailPageState extends State<SurahDetailPage> {
                   key: _itemKeys[index],
                   color: Colors.black87,
                   elevation: isThisPlaying ? 10 : 2,
-                  shadowColor:
-                  isThisPlaying ? Colors.orangeAccent : Colors.black54,
+                  shadowColor: isThisPlaying
+                      ? Colors.orangeAccent
+                      : Colors.black54,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(14),
                     side: isThisPlaying
@@ -438,7 +410,11 @@ class _SurahDetailPageState extends State<SurahDetailPage> {
                           Text(
                             selectedLanguage == "maranao"
                                 ? (ayah['text_mn'] ?? "")
-                                : (ayah['translation_tl'] ?? "—"),
+                                : selectedLanguage == "tagalog"
+                                ? (ayah['translation_tl'] ?? "—")
+                                : selectedLanguage == "bisayan"
+                                ? (ayah['translation_bis'] ?? "—")
+                                : (ayah['translation_en'] ?? "—"),
                             textAlign: TextAlign.left,
                             style: GoogleFonts.merriweather(
                               fontSize: 16,
@@ -502,33 +478,31 @@ class _SurahDetailPageState extends State<SurahDetailPage> {
                                 },
                               ),
 
-                              // ❤️
+                              // ❤️ Add to Favorites
                               IconButton(
                                 iconSize: 22,
-                                icon: const Icon(Icons.favorite_border,
-                                    color: Colors.red),
+                                icon: const Icon(Icons.favorite_border, color: Colors.red),
                                 onPressed: () async {
                                   final ayahData = {
                                     'surah_number': widget.surahNumber,
                                     'ayah_number': ayah['ayah_number'],
-                                    'text_ar': ayah['text_ar'],
-                                    'text_mn': ayah['text_mn'],
-                                    'translation_tl':
-                                    ayah['translation_tl'],
+                                    'text_ar': ayah['text_ar'] ?? "",
+                                    'text_mn': ayah['text_mn'] ?? "",
+                                    'translation_tl': ayah['translation_tl'] ?? "",
+                                    'translation_bis': ayah['translation_bis'] ?? "",
+                                    'translation_en': ayah['translation_en'] ?? "",
                                   };
-                                  await BookmarkManager.addFavorite(
-                                      ayahData);
+
+                                  await BookmarkManager.addFavorite(ayahData);
+
                                   if (context.mounted) {
-                                    ScaffoldMessenger.of(context)
-                                        .showSnackBar(
+                                    ScaffoldMessenger.of(context).showSnackBar(
                                       SnackBar(
                                         content: Text(
                                           "Added to Favorites",
-                                          style:
-                                          GoogleFonts.merriweather(),
+                                          style: GoogleFonts.merriweather(),
                                         ),
-                                        duration:
-                                        const Duration(seconds: 2),
+                                        duration: const Duration(seconds: 2),
                                       ),
                                     );
                                   }
@@ -543,7 +517,7 @@ class _SurahDetailPageState extends State<SurahDetailPage> {
                                 onPressed: () {
                                   final shareText =
                                       "${ayah['text_ar']} "
-                                      "\n\n${selectedLanguage == "maranao" ? (ayah['text_mn'] ?? "") : (ayah['translation_tl'] ?? "—")} "
+                                      "\n\n${selectedLanguage == "maranao" ? (ayah['text_mn'] ?? "") : selectedLanguage == "tagalog" ? (ayah['translation_tl'] ?? "—") : selectedLanguage == "bisayan" ? (ayah['translation_bis'] ?? "—") : (ayah['translation_en'] ?? "—")} "
                                       "\n\n(${widget.surahNumber}:${ayah['ayah_number']})";
                                   Share.share(shareText);
                                 },
